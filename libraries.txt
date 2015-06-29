@@ -1,0 +1,6 @@
+Timer, https://github.com/JChristensen/Timer/releases/tag/v2.1
+Adafruit_NeoPixel, https://github.com/adafruit/Adafruit_NeoPixel/releases/tag/v1.0.2
+Adafruit-GFX-Library, https://github.com/adafruit/Adafruit-GFX-Library/releases/tag/v1.0.2
+RunningAverage, https://github.com/RobTillaart/Arduino/tree/master/libraries/RunningAverage
+Adafruit-LED-Backpack-Library, https://github.com/adafruit/Adafruit-LED-Backpack-Library/releases/tag/1.0.0
+Button, https://github.com/JChristensen/Button

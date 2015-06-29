@@ -1,7 +1,8 @@
+#include <Math.h>
 #include <Wire.h>
 #include <Button.h>
 #include <Timer.h>
-#include <RunningAverage.h>
+// #include <RunningAverage.h>
 #include <Adafruit_NeoPixel.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_LEDBackpack.h>
@@ -13,10 +14,13 @@
 #define CLICKS_PER_REVOLUTION 20
 #define VELOCITY_SAMPLES 5
 #define MAX_TIME_DELTA 1500
-#define DECAY 0.98f
+#define SPEED_PER_CLICK 0.05
+#define DECAY 0.98
+#define PI 3.141592653589793
+#define TWOPI 6.28318530717959
 
 #define NEOPIXELS_PIN 1
-#define NUM_NEOPIXELS 4
+#define NUM_NEOPIXELS 5
 
 // Parameter 1 = number of pixels in strip
 // Parameter 2 = Arduino pin number (most are valid)
@@ -34,11 +38,10 @@ uint32_t prevTime = 0;
 uint16_t prevVelocity = 0;
 uint16_t rainbowIndex = 0;
 
-Button clickerBtn = Button(CLICKER_PIN, BUTTON_PULLUP, BUTTON_INVERT, BUTTON_DEBOUNCE);
-Timer t;
-Adafruit_24bargraph bar = Adafruit_24bargraph();
-RunningAverage timeDeltas(CLICKS_PER_REVOLUTION);
-RunningAverage speedDeltas(VELOCITY_SAMPLES);
+struct Colors {
+  uint32_t white = strip.Color(255, 255, 255);
+  uint32_t off = 0;
+};
 
 // Wheel states
 enum {
@@ -47,25 +50,23 @@ enum {
   WHEEL_STOPPED
 };
 
-byte wheelState = WHEEL_STOPPED;
+struct WheelData {
+  float position = 0; // Radians
+  float decay = 0.98;
+  float speed = 0; // Radians per second.
+  float acceleration = 0; // Radians per second per second
+  float distancePerClick = TWOPI / CLICKS_PER_REVOLUTION;
+  byte wheelState = WHEEL_STOPPED;
+  byte lightIndex = 0;
+};
 
-float accelAmt = .2;
-void click()
-{
-  //increase speed by some amount
-  currentWheelSpeed += accelAmt;
-}
-
-void updateMotion()
-{
-  //apply 'friction' to speed
-
-
-  //increment position by speed
-
-
-  //convert position to light index
-}
+Button clickerBtn = Button(CLICKER_PIN, BUTTON_PULLUP, BUTTON_INVERT, BUTTON_DEBOUNCE);
+Timer t;
+Adafruit_24bargraph bar = Adafruit_24bargraph();
+// RunningAverage timeDeltas(CLICKS_PER_REVOLUTION);
+// RunningAverage speedDeltas(VELOCITY_SAMPLES);
+WheelData wheelData;
+Colors colors;
 
 void setup() {
   Serial.begin(9600);
@@ -84,8 +85,8 @@ void setup() {
 
   // Setup timer event intervals.
   // The tick event runs much more frequently, at about 100Hz, for low-latency when reading buttons.
-  tickEvent = t.every(10, tick, (void*)0);
-  displayEvent = t.every(200, display, (void*)0);
+  tickEvent = t.every(20, tick, (void*)0);
+  displayEvent = t.every(100, display, (void*)0);
 
   strip.begin();
   strip.show(); // Initialize all pixels to 'off'
@@ -98,62 +99,86 @@ void loop() {
 
 void tick(void* context) {
   readClicker();
-  rainbowCycle();
+  updateMotion();
+  if (wheelData.speed <= 0.01) {
+    rainbowCycle();
+  }
 }
 
 void display(void* context) {
-  float speedDeltasAverage = speedDeltas.getAverage();
-  setBarPercentage(speedDeltasAverage);
-  Serial.println(speedDeltasAverage);
+  byte i;
+
+  // float speedDeltasAverage = speedDeltas.getAverage();
+  setBarPercentage(100 * wheelData.speed);
+  Serial.println(wheelData.speed);
+  Serial.println(wheelData.position);
+  Serial.println(wheelData.lightIndex);
+  Serial.println("---");
+  // Light up the current light
+  for(i = 0; i < strip.numPixels(); i++) {
+    if (i == wheelData.lightIndex) {
+      strip.setPixelColor(i, colors.white);
+    }
+    else {
+      strip.setPixelColor(i, colors.off); 
+    }
+  }
+  strip.show();
+
   // float acceleration = accelerationAverage.getAverage();
   // Serial.print("acceleration: ");
   // Serial.println(acceleration);
 }
 
-uint16_t velocityFromTimeDelta(uint32_t timeDelta) {
-  return 1000 / timeDelta;
+void click() {
+  // increase speed by some amount
+  wheelData.speed += SPEED_PER_CLICK;
+
+  // if (wheelState == WHEEL_STOPPED) {
+  //   Serial.println("accelerating");
+  //   wheelState = WHEEL_ACCELERATING;
+  //   // Seed the time deltas with the first time delta value.
+  //   timeDeltas.fillValue(timeDelta, CLICKS_PER_REVOLUTION);
+  // }
+  // else {
+  //   timeDeltas.addValue(timeDelta);
+  // }
+  // // Stopped?
+  // if (timeDelta > MAX_TIME_DELTA) {
+  //   Serial.println("stopping");
+  //   Serial.println(timeDelta);
+  //   wheelState = WHEEL_STOPPED;
+  //   prevTime = 0;
+  //   timeDeltas.fillValue(0, CLICKS_PER_REVOLUTION);
+  //   speedDeltas.fillValue(0, VELOCITY_SAMPLES);
+  //   return;
+  // }
+}
+
+void updateMotion() {
+  byte lightIndex;
+
+  //apply 'friction' to speed
+  wheelData.speed *= wheelData.decay;
+
+  //increment position by speed
+  wheelData.position += wheelData.speed;
+
+  // Reset position after exceeding 2PI.
+  if (wheelData.position >= TWOPI) {
+    wheelData.position -= TWOPI;
+  }
+
+  //convert position to light index
+  wheelData.lightIndex = floor(wheelData.position * NUM_NEOPIXELS / TWOPI);
 }
 
 void readClicker() {
-  uint32_t now = millis();
-  uint32_t timeDelta;
-  uint16_t speedDelta;
-  uint32_t timeDeltasAverage;
-  boolean isFirstClick = prevTime == 0;
-
   clickerBtn.read();
 
   if (clickerBtn.wasPressed()) {
-    timeDelta = now - prevTime;
-    prevTime = now;
-    // First click is ignored.
-    if (isFirstClick) {
-      return;
-    }
-    speedDelta = velocityFromTimeDelta(timeDelta) - prevVelocity;
-    prevVelocity = velocityFromTimeDelta(timeDelta);
-    if (wheelState == WHEEL_STOPPED) {
-      Serial.println("accelerating");
-      wheelState = WHEEL_ACCELERATING;
-      // Seed the time deltas with the first time delta value.
-      timeDeltas.fillValue(timeDelta, CLICKS_PER_REVOLUTION);
-    }
-    else {
-      timeDeltas.addValue(timeDelta);
-    }
-    // Stopped?
-    if (timeDelta > MAX_TIME_DELTA) {
-      Serial.println("stopping");
-      Serial.println(timeDelta);
-      wheelState = WHEEL_STOPPED;
-      prevTime = 0;
-      timeDeltas.fillValue(0, CLICKS_PER_REVOLUTION);
-      speedDeltas.fillValue(0, VELOCITY_SAMPLES);
-      return;
-    }
+    click();
   }
-  timeDeltasAverage = timeDeltas.getAverage();
-  speedDeltas.addValue(timeDeltasAverage);
 }
 
 void setBarPercentage(byte value) {
