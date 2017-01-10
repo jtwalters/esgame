@@ -1,2 +1,2 @@
 # esgame
-Spinning wheel arduino game.
+Spinning wheel arduino game. Fun.
